@@ -9,8 +9,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # The Yarn GPG key (23E7166788B63E1E) has expired, causing apt-get update failures
 # We don't need Yarn as we use npm/npx. If Yarn is needed, use corepack instead.
 RUN rm -f /etc/apt/sources.list.d/yarn.list && \
-    rm -f /usr/share/keyrings/yarnkey.gpg && \
-    apt-get update 2>&1 | grep -i "yarn" || true
+    rm -f /usr/share/keyrings/yarnkey.gpg
 
 RUN apt-get install -y --no-install-recommends \
     libsodium-dev \
