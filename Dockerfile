@@ -2,8 +2,11 @@
 FROM php:8.3-apache AS base
 
 # Install Node.js 24 (includes npm)
+# Clean up Yarn repository to prevent GPG key expiration errors
+# Yarn's GPG key (23E7166788B63E1E) has expired, causing apt-get failures if repository is present
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -f /etc/apt/sources.list.d/yarn.list /usr/share/keyrings/yarnkey.gpg
 
 RUN apt-get install -y --no-install-recommends \
     libsodium-dev \
