@@ -1,6 +1,9 @@
 #p Testing image used for GitLab CI
 FROM php:8.3-apache AS base
 
+# Disbale npm lifecycle scripts.
+ENV npm_config_ignore_scripts=true
+
 # Install Node.js 24 (includes npm)
 # Clean up Yarn repository to prevent GPG key expiration errors
 # Yarn's GPG key (23E7166788B63E1E) has expired, causing apt-get failures if repository is present
