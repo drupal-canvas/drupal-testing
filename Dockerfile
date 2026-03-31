@@ -12,6 +12,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     rm -f /etc/apt/sources.list.d/yarn.list /usr/share/keyrings/yarnkey.gpg
 
 RUN apt-get install -y --no-install-recommends \
+    libavif-dev \
     libsodium-dev \
     libpng-dev \
     libjpeg-dev \
@@ -32,8 +33,8 @@ RUN apt-get install -y --no-install-recommends \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Configure GD with jpeg and freetype support
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg
+# Configure GD with jpeg, freetype, and avif support. Configure intl.
+RUN docker-php-ext-configure gd intl --with-freetype --with-jpeg --with-avif
 
 # Install PHP extensions required by Drupal
 RUN docker-php-ext-install -j$(nproc) \
@@ -65,6 +66,7 @@ RUN a2enmod rewrite
 RUN echo "memory_limit = -1" > /usr/local/etc/php/conf.d/cli-memory.ini
 # Set reasonable limit for Apache
 RUN echo "memory_limit = 512M" > /usr/local/etc/php/conf.d/apache-memory.ini
+RUN echo "post_max_size = 64M" > /usr/local/etc/php/conf.d/post-max-size.ini
 
 # Install Playwright OS dependencies.
 RUN npx playwright install-deps
