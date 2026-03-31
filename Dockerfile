@@ -33,8 +33,8 @@ RUN apt-get install -y --no-install-recommends \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Configure GD with jpeg, freetype, and avif support. Configure intl.
-RUN docker-php-ext-configure gd intl --with-freetype --with-jpeg --with-avif
+# Configure GD with jpeg, freetype, and avif support.
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-avif
 
 # Install PHP extensions required by Drupal
 RUN docker-php-ext-install -j$(nproc) \
@@ -43,6 +43,7 @@ RUN docker-php-ext-install -j$(nproc) \
     pdo_mysql \
     mysqli \
     gd \
+    intl \
     opcache \
     zip \
     mbstring \
