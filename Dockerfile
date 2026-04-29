@@ -24,6 +24,7 @@ RUN apt-get install -y --no-install-recommends \
     libzip-dev \
     libonig-dev \
     libxml2-dev \
+    libpq-dev \
     curl \
     jq \
     unzip \
@@ -41,6 +42,7 @@ RUN docker-php-ext-install -j$(nproc) \
     sodium \
     pdo \
     pdo_mysql \
+    pdo_pgsql \
     mysqli \
     gd \
     intl \
