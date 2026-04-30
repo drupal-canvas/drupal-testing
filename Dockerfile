@@ -31,6 +31,7 @@ RUN apt-get install -y --no-install-recommends \
     ca-certificates \
     sudo \
     git \
+    postgresql-client \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
