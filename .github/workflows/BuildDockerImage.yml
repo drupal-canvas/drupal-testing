@@ -8,7 +8,14 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# A new push to the PR makes the previous build moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # The generic and Chromium images, one after the other on the same builder so
+  # the Chromium build reuses `base` (see PublishDockerImage.yml).
   build-and-push-image:
     runs-on: ubuntu-latest
     permissions:
@@ -23,7 +30,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract metadata (tags, labels) for the generic image
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
@@ -32,13 +39,72 @@ jobs:
             type=ref,event=pr
             type=sha
 
+      - name: Build the generic image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          target: default
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=default
+          cache-to: type=gha,mode=max,scope=default
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Extract metadata (tags, labels) for the Chromium image
+        id: meta-chromium
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/chromium
+          tags: |
+            type=ref,event=pr
+            type=sha
+
+      - name: Build the Chromium image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          target: chromium
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=chromium
+          cache-to: type=gha,mode=max,scope=chromium
+          tags: ${{ steps.meta-chromium.outputs.tags }}
+          labels: ${{ steps.meta-chromium.outputs.labels }}
+
+  # Matches the nightly publish: amd64 only, mode=min (see PublishDockerImage.yml).
+  # A separate job, as building it on the same runner as the other two could
+  # run out of disk.
+  build-canvas-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/canvas
+          tags: |
+            type=ref,event=pr
+            type=sha
+
       - name: Build Docker image
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          target: canvas
+          platforms: linux/amd64
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=canvas
+            type=gha,scope=chromium
+          cache-to: type=gha,mode=min,scope=canvas
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

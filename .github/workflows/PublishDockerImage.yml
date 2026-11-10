@@ -5,14 +5,27 @@ on:
     branches: ['main']
     tags:
       - 'v*.*.*'
+  # The Canvas image is only built nightly (or by hand), so its caches track
+  # Canvas's branch. Pushes and tags only build the generic images.
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Builds the generic and Chromium images one after the other on the same
+  # builder, so the Chromium build reuses the exact `base` layers from the first
+  # build. Both images then share those layers in the registry.
   build-and-push-image:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # One publish per ref at a time, so two pushes can't race on the same tags.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -35,34 +48,129 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract metadata (tags, labels) for the generic image
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha
 
+      - name: Build and push the generic image
+        id: push
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          target: default
+          platforms: linux/amd64,linux/arm64
+          push: true
+          cache-from: type=gha,scope=default
+          cache-to: type=gha,mode=max,scope=default
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Generate artifact attestation for the generic image
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Extract metadata (tags, labels) for the Chromium image
+        id: meta-chromium
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/chromium
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      # The canvas job reads this cache scope, so it also gets the shared base
+      # and Chromium dependency layers.
+      - name: Build and push the Chromium image
+        id: push-chromium
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          target: chromium
+          platforms: linux/amd64,linux/arm64
+          push: true
+          cache-from: type=gha,scope=chromium
+          cache-to: type=gha,mode=max,scope=chromium
+          tags: ${{ steps.meta-chromium.outputs.tags }}
+          labels: ${{ steps.meta-chromium.outputs.labels }}
+
+      - name: Generate artifact attestation for the Chromium image
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/chromium
+          subject-digest: ${{ steps.push-chromium.outputs.digest }}
+          push-to-registry: true
+
+  build-and-push-canvas-image:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # A manual run and the nightly run both push `nightly`; run them one at a time.
+    concurrency:
+      group: publish-canvas
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/canvas
+          tags: |
+            type=raw,value=nightly
+
+      # drupal.org's GitLab runners are amd64, so this skips arm64.
+      # The Canvas build stage reruns whenever Canvas's branch moves, which is
+      # nearly every night, so caching its layers (mode=max) would only fill the
+      # GHA cache. mode=min keeps just the layers the image ships; the shared
+      # base layers can also come from the Chromium image's cache.
       - name: Build and push Docker image
         id: push
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          target: canvas
+          platforms: linux/amd64
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=canvas
+            type=gha,scope=chromium
+          cache-to: type=gha,mode=min,scope=canvas
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/canvas
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
