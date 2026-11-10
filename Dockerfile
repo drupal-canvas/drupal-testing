@@ -1,18 +1,25 @@
 # syntax=docker/dockerfile:1
+# Node.js 24 is copied from the official image rather than installed from
+# NodeSource's apt repository, which is about 65 MB smaller.
+FROM node:24-slim AS node
+
 # Testing image used for GitLab CI
 FROM php:8.3-apache AS base
 
 # Disbale npm lifecycle scripts.
 ENV npm_config_ignore_scripts=true
 
-# Install Node.js 24 (includes npm)
-# Clean up Yarn repository to prevent GPG key expiration errors
-# Yarn's GPG key (23E7166788B63E1E) has expired, causing apt-get failures if repository is present
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -f /etc/apt/sources.list.d/yarn.list /usr/share/keyrings/yarnkey.gpg
+# Node.js 24 with npm and npx (Yarn isn't copied).
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 
-RUN apt-get install -y --no-install-recommends \
+# Each layer that installs packages cleans up after itself: files deleted in a
+# later layer still ship in the earlier one.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     libavif-dev \
     libsodium-dev \
     libpng-dev \
@@ -34,13 +41,13 @@ RUN apt-get install -y --no-install-recommends \
     git \
     postgresql-client \
     && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/*
 
-# Configure GD with jpeg, freetype, and avif support.
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-avif
-
-# Install PHP extensions required by Drupal
-RUN docker-php-ext-install -j$(nproc) \
+# Configure GD with jpeg, freetype, and avif support, and install the PHP
+# extensions required by Drupal. These share a layer because configuring
+# unpacks the PHP source (~150 MB), which only the install step removes.
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-avif && \
+    docker-php-ext-install -j$(nproc) \
     sodium \
     pdo \
     pdo_mysql \
@@ -53,14 +60,8 @@ RUN docker-php-ext-install -j$(nproc) \
     mbstring \
     xml \
     dom \
-    simplexml
-
-RUN apt-get clean && \
-    rm -rf /var/lib/apt/lists/* \
-    /tmp/* \
-    /var/tmp/* \
-    /usr/share/doc/* \
-    /usr/share/man/*
+    simplexml && \
+    rm -rf /tmp/* /var/tmp/*
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
@@ -88,11 +89,10 @@ RUN CHROME_VERSION=$(curl -s https://googlechromelabs.github.io/chrome-for-testi
 WORKDIR /var/www/html
 
 # Playwright's OS dependencies for Chromium only (also enough for Chrome for
-# Testing above). The `npx` download and apt lists are removed in the same
-# layer so they don't ship.
+# Testing above).
 FROM base AS chromium-deps
 RUN npx playwright install-deps chromium && \
-    rm -rf /root/.npm /var/lib/apt/lists/*
+    rm -rf /root/.npm /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/*
 
 # Builds Drupal Canvas (https://www.drupal.org/project/canvas) the way its CI
 # does, to fill the caches the `canvas` target ships. Nothing else from this
@@ -174,7 +174,7 @@ RUN apt-get update && \
     libxss1 \
     libxtst6 \
     xauth \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
 
 ENV CANVAS_CACHE_DIR=/opt/canvas-cache
 ENV COMPOSER_CACHE_DIR=${CANVAS_CACHE_DIR}/composer \
@@ -191,7 +191,7 @@ FROM chromium-deps AS chromium
 # Use current date to bust cache
 # Install current browsers
 RUN date > /tmp/cache-bust && npx playwright install --with-deps chromium && \
-    rm -rf /root/.npm /var/lib/apt/lists/*
+    rm -rf /root/.npm /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/*
 
 # The generic image with every Playwright browser. As the last stage it's the
 # default target, so a plain `docker build .` still produces it.
@@ -199,9 +199,9 @@ FROM base AS default
 
 # Install Playwright OS dependencies.
 RUN npx playwright install-deps && \
-    rm -rf /root/.npm /var/lib/apt/lists/*
+    rm -rf /root/.npm /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/*
 
 # Use current date to bust cache
 # Install current browsers
 RUN date > /tmp/cache-bust && npx playwright install --with-deps && \
-    rm -rf /root/.npm /var/lib/apt/lists/*
+    rm -rf /root/.npm /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/*
