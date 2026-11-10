@@ -8,6 +8,11 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# A new push to the PR makes the previous build moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
@@ -17,8 +22,22 @@ jobs:
         include:
           - target: default
             image-suffix: ''
+            platforms: linux/amd64,linux/arm64
+            cache-from: type=gha,scope=default
+            cache-to: type=gha,mode=max,scope=default
+          - target: chromium
+            image-suffix: '/chromium'
+            platforms: linux/amd64,linux/arm64
+            cache-from: type=gha,scope=chromium
+            cache-to: type=gha,mode=max,scope=chromium
+          # Matches the nightly publish: amd64 only, mode=min (see PublishDockerImage.yml).
           - target: canvas
             image-suffix: '/canvas'
+            platforms: linux/amd64
+            cache-from: |
+              type=gha,scope=canvas
+              type=gha,scope=chromium
+            cache-to: type=gha,mode=min,scope=canvas
     permissions:
       contents: read
     steps:
@@ -26,6 +45,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up QEMU
+        if: contains(matrix.platforms, 'arm64')
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -45,9 +65,9 @@ jobs:
         with:
           context: .
           target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
           push: false
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+          cache-from: ${{ matrix.cache-from }}
+          cache-to: ${{ matrix.cache-to }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
