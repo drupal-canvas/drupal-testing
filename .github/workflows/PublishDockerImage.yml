@@ -5,6 +5,12 @@ on:
     branches: ['main']
     tags:
       - 'v*.*.*'
+  # Nightly rebuild so the Canvas image's caches track Canvas's branch. The
+  # Canvas clone is re-checked each build, so if nothing changed upstream the
+  # build is served from the layer cache.
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -13,6 +19,14 @@ env:
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: default
+            image-suffix: ''
+          - target: canvas
+            image-suffix: '/canvas'
     permissions:
       contents: read
       packages: write
@@ -39,7 +53,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image-suffix }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -53,16 +67,17 @@ jobs:
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
           context: .
+          target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image-suffix }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true

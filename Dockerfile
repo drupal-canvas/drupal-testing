@@ -1,4 +1,5 @@
-#p Testing image used for GitLab CI
+# syntax=docker/dockerfile:1
+# Testing image used for GitLab CI
 FROM php:8.3-apache AS base
 
 # Disbale npm lifecycle scripts.
@@ -92,3 +93,63 @@ RUN CHROME_VERSION=$(curl -s https://googlechromelabs.github.io/chrome-for-testi
 RUN date > /tmp/cache-bust && npx playwright install --with-deps
 
 WORKDIR /var/www/html
+
+# Drupal Canvas image: the base image plus warm npm, Composer, Turborepo,
+# Playwright and Cypress caches for https://www.drupal.org/project/canvas.
+# Build with `--target canvas`.
+FROM base AS canvas
+
+ARG CANVAS_REPO=https://git.drupalcode.org/project/canvas.git
+ARG CANVAS_REF=1.x
+# Defaults to DRUPAL_CORE from Canvas's .gitlab-ci.yml; set to override.
+ARG DRUPAL_CORE=
+
+# Canvas's CI points these at $CI_PROJECT_DIR/.cache/*; leave them unset there
+# (or copy from here) to use the caches baked into this image.
+ENV CANVAS_CACHE_DIR=/opt/canvas-cache
+ENV COMPOSER_CACHE_DIR=${CANVAS_CACHE_DIR}/composer \
+    npm_config_cache=${CANVAS_CACHE_DIR}/npm \
+    TURBO_CACHE_DIR=${CANVAS_CACHE_DIR}/turbo \
+    PLAYWRIGHT_BROWSERS_PATH=${CANVAS_CACHE_DIR}/ms-playwright \
+    CYPRESS_CACHE_FOLDER=${CANVAS_CACHE_DIR}/cypress \
+    COMPOSER_NO_BLOCKING=1 \
+    COMPOSER_NO_SECURITY_BLOCKING=1 \
+    COMPOSER_PROCESS_TIMEOUT=0 \
+    COMPOSER_ALLOW_SUPERUSER=1 \
+    TURBO_TELEMETRY_DISABLED=1
+
+# BuildKit re-checks the remote ref on every build, so this layer (and those
+# after it) rebuild whenever the Canvas branch moves.
+ADD --keep-git-dir=true ${CANVAS_REPO}#${CANVAS_REF} /tmp/canvas-build/canvas
+
+# npm + Turborepo: mirror the `.canvas-ui` CI step, plus the browser downloads
+# from the `cache dependencies` job.
+RUN cd /tmp/canvas-build/canvas && \
+    npm ci && \
+    npm run build -w ui && \
+    npx playwright install && \
+    npx cypress install
+
+# Composer: mirror `.drupal-files-with-dev-dependencies` in Canvas's CI.
+RUN cd /tmp/canvas-build && \
+    DRUPAL_CORE=${DRUPAL_CORE:-$(sed -n 's/^  DRUPAL_CORE: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' canvas/.gitlab-ci.yml)} && \
+    test -n "${DRUPAL_CORE}" && echo "Using Drupal core ${DRUPAL_CORE}" && \
+    composer create-project drupal/recommended-project:${DRUPAL_CORE} _drupal --no-install --no-interaction && \
+    cd _drupal && \
+    composer config minimum-stability dev && \
+    composer config prefer-stable true && \
+    composer config repositories.canvas --json '{"type": "path", "url": "../canvas", "options": {"symlink": false}}' && \
+    if [ "${DRUPAL_CORE#11.4.}" != "${DRUPAL_CORE}" ]; then composer require twig/twig:3.29.0 --no-update; fi && \
+    composer require "drupal/core-dev:${DRUPAL_CORE}" "drupal/canvas @dev" --with-all-dependencies --no-install --no-interaction && \
+    PACKAGES=$(jq -r '.["require-dev"] // {} | to_entries[] | "\(.key):\(.value)"' ../canvas/composer.json | tr '\n' ' ') && \
+    composer require ${PACKAGES} --dev -W --no-interaction
+
+# Keep only the caches; make them writable by whichever user CI runs as.
+RUN rm -rf /tmp/canvas-build && \
+    chmod -R a+rwX ${CANVAS_CACHE_DIR}
+
+WORKDIR /var/www/html
+
+# The last stage is the default target, so a plain `docker build .` still
+# produces the generic image.
+FROM base AS default
