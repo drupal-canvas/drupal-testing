@@ -14,30 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The generic and Chromium images, one after the other on the same builder so
+  # the Chromium build reuses `base` (see PublishDockerImage.yml).
   build-and-push-image:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: default
-            image-suffix: ''
-            platforms: linux/amd64,linux/arm64
-            cache-from: type=gha,scope=default
-            cache-to: type=gha,mode=max,scope=default
-          - target: chromium
-            image-suffix: '/chromium'
-            platforms: linux/amd64,linux/arm64
-            cache-from: type=gha,scope=chromium
-            cache-to: type=gha,mode=max,scope=chromium
-          # Matches the nightly publish: amd64 only, mode=min (see PublishDockerImage.yml).
-          - target: canvas
-            image-suffix: '/canvas'
-            platforms: linux/amd64
-            cache-from: |
-              type=gha,scope=canvas
-              type=gha,scope=chromium
-            cache-to: type=gha,mode=min,scope=canvas
     permissions:
       contents: read
     steps:
@@ -45,8 +25,63 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up QEMU
-        if: contains(matrix.platforms, 'arm64')
         uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata (tags, labels) for the generic image
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=pr
+            type=sha
+
+      - name: Build the generic image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          target: default
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=default
+          cache-to: type=gha,mode=max,scope=default
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Extract metadata (tags, labels) for the Chromium image
+        id: meta-chromium
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/chromium
+          tags: |
+            type=ref,event=pr
+            type=sha
+
+      - name: Build the Chromium image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          target: chromium
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=chromium
+          cache-to: type=gha,mode=max,scope=chromium
+          tags: ${{ steps.meta-chromium.outputs.tags }}
+          labels: ${{ steps.meta-chromium.outputs.labels }}
+
+  # Matches the nightly publish: amd64 only, mode=min (see PublishDockerImage.yml).
+  # A separate job, as building it on the same runner as the other two could
+  # run out of disk.
+  build-canvas-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -55,7 +90,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image-suffix }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/canvas
           tags: |
             type=ref,event=pr
             type=sha
@@ -64,10 +99,12 @@ jobs:
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
           context: .
-          target: ${{ matrix.target }}
-          platforms: ${{ matrix.platforms }}
+          target: canvas
+          platforms: linux/amd64
           push: false
-          cache-from: ${{ matrix.cache-from }}
-          cache-to: ${{ matrix.cache-to }}
+          cache-from: |
+            type=gha,scope=canvas
+            type=gha,scope=chromium
+          cache-to: type=gha,mode=min,scope=canvas
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

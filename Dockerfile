@@ -165,6 +165,17 @@ RUN ln -s "$CANVAS_CACHE_DIR" canvas/.cache && \
 # copied in as one layer. Build with `--target canvas`.
 FROM chromium-deps AS canvas
 
+# Cypress's OS dependencies that Playwright's Chromium dependencies don't
+# already cover. See https://on.cypress.io/required-dependencies.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libgtk-3-0t64 \
+    libnotify4 \
+    libxss1 \
+    libxtst6 \
+    xauth \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV CANVAS_CACHE_DIR=/opt/canvas-cache
 ENV COMPOSER_CACHE_DIR=${CANVAS_CACHE_DIR}/composer \
     npm_config_cache=${CANVAS_CACHE_DIR}/npm \
