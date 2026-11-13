@@ -109,6 +109,7 @@ ARG DRUPAL_CORE_NEXT_MINOR=
 
 ENV CANVAS_CACHE_DIR=/opt/canvas-cache
 ENV COMPOSER_CACHE_DIR=${CANVAS_CACHE_DIR}/composer \
+    COMPOSER_HOME=${CANVAS_CACHE_DIR}/composer-home \
     npm_config_cache=${CANVAS_CACHE_DIR}/npm \
     TURBO_CACHE_DIR=${CANVAS_CACHE_DIR}/turbo \
     PLAYWRIGHT_BROWSERS_PATH=${CANVAS_CACHE_DIR}/ms-playwright \
@@ -124,6 +125,8 @@ ENV COMPOSER_CACHE_DIR=${CANVAS_CACHE_DIR}/composer \
 ADD --keep-git-dir=true ${CANVAS_REPO}#${CANVAS_REF} /tmp/canvas-build/canvas
 
 WORKDIR /tmp/canvas-build
+
+RUN composer config --global cache-files-maxsize 2GiB
 
 # Composer: mirror `.drupal-files-with-dev-dependencies` in Canvas's CI, once
 # per core version that CI tests against. This runs before `npm ci` because the
@@ -178,6 +181,7 @@ RUN apt-get update && \
 
 ENV CANVAS_CACHE_DIR=/opt/canvas-cache
 ENV COMPOSER_CACHE_DIR=${CANVAS_CACHE_DIR}/composer \
+    COMPOSER_HOME=${CANVAS_CACHE_DIR}/composer-home \
     npm_config_cache=${CANVAS_CACHE_DIR}/npm \
     TURBO_CACHE_DIR=${CANVAS_CACHE_DIR}/turbo \
     PLAYWRIGHT_BROWSERS_PATH=${CANVAS_CACHE_DIR}/ms-playwright \

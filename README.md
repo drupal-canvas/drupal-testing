@@ -47,6 +47,8 @@ ln -sfn "$CANVAS_CACHE_DIR/astro" "$CI_PROJECT_DIR/.cache/astro"
 ln -sfn "$CANVAS_CACHE_DIR/tsc" "$CI_PROJECT_DIR/.cache/tsc"
 ```
 
+`composer config --global cache-files-maxsize 2GiB` itself.
+
 Canvas's CI should install Playwright browsers the same way. A bare
 `npx playwright install` downloads every browser on every job.
 
