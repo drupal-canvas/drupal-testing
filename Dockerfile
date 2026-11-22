@@ -1,10 +1,15 @@
 # syntax=docker/dockerfile:1
+
+# The PHP version of every image. The `canvas` image is also built with PHP 8.5
+# (see PublishDockerImage.yml), which Drupal 12 requires.
+ARG PHP_VERSION=8.3
+
 # Node.js 24 is copied from the official image rather than installed from
 # NodeSource's apt repository, which is about 65 MB smaller.
 FROM node:24-slim AS node
 
 # Testing image used for GitLab CI
-FROM php:8.3-apache AS base
+FROM php:${PHP_VERSION}-apache AS base
 
 # Disbale npm lifecycle scripts.
 ENV npm_config_ignore_scripts=true
@@ -46,21 +51,13 @@ RUN apt-get update && \
 # Configure GD with jpeg, freetype, and avif support, and install the PHP
 # extensions required by Drupal. These share a layer because configuring
 # unpacks the PHP source (~150 MB), which only the install step removes.
+# Extensions that the PHP image already has are skipped: rebuilding some of
+# them fails on PHP 8.5, such as OPcache and dom.
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-avif && \
-    docker-php-ext-install -j$(nproc) \
-    sodium \
-    pdo \
-    pdo_mysql \
-    pdo_pgsql \
-    mysqli \
-    gd \
-    intl \
-    opcache \
-    zip \
-    mbstring \
-    xml \
-    dom \
-    simplexml && \
+    extensions=$(for ext in sodium pdo pdo_mysql pdo_pgsql mysqli gd intl opcache zip mbstring xml dom simplexml; do \
+      php -r 'exit(extension_loaded($argv[1] === "opcache" ? "Zend OPcache" : $argv[1]) ? 0 : 1);' "$ext" || echo "$ext"; \
+    done) && \
+    docker-php-ext-install -j$(nproc) $extensions && \
     rm -rf /tmp/* /var/tmp/*
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer

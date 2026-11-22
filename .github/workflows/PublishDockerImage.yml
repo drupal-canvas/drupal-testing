@@ -114,12 +114,22 @@ jobs:
           subject-digest: ${{ steps.push-chromium.outputs.digest }}
           push-to-registry: true
 
+  # One Canvas image per PHP version: `nightly` with PHP 8.3, and
+  # `nightly-php8.5` for testing on Drupal 12, which requires PHP 8.5.
   build-and-push-canvas-image:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # A manual run and the nightly run both push `nightly`; run them one at a time.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.3'
+            tag: nightly
+          - php: '8.5'
+            tag: nightly-php8.5
+    # A manual run and the nightly run both push the same tag; run them one at a time.
     concurrency:
-      group: publish-canvas
+      group: publish-canvas-${{ matrix.tag }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -146,7 +156,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/canvas
           tags: |
-            type=raw,value=nightly
+            type=raw,value=${{ matrix.tag }}
 
       # drupal.org's GitLab runners are amd64, so this skips arm64.
       # The Canvas build stage reruns whenever Canvas's branch moves, which is
@@ -161,10 +171,11 @@ jobs:
           target: canvas
           platforms: linux/amd64
           push: true
+          build-args: PHP_VERSION=${{ matrix.php }}
           cache-from: |
-            type=gha,scope=canvas
+            type=gha,scope=canvas-php${{ matrix.php }}
             type=gha,scope=chromium
-          cache-to: type=gha,mode=min,scope=canvas
+          cache-to: type=gha,mode=min,scope=canvas-php${{ matrix.php }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
