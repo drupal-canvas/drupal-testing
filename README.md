@@ -9,11 +9,12 @@ Docker images for testing Drupal projects in CI.
 | `ghcr.io/drupal-canvas/drupal-testing` | `default` | amd64, arm64 | On pushes to `main` and `v*` tags | PHP 8.3 + Apache, Node.js 24, Composer, Chrome for Testing + ChromeDriver, all Playwright browsers and their OS dependencies. |
 | `ghcr.io/drupal-canvas/drupal-testing/chromium` | `chromium` | amd64, arm64 | On pushes to `main` and `v*` tags | The above, but with only Playwright's Chromium and the OS dependencies it needs. Same tags as the generic image. |
 | `ghcr.io/drupal-canvas/drupal-testing/canvas:nightly` | `canvas` | amd64 | Nightly, or by hand from the Actions tab | The Chromium image's OS dependencies (no generic Playwright browsers), plus warm caches for [Drupal Canvas](https://www.drupal.org/project/canvas). |
+| `ghcr.io/drupal-canvas/drupal-testing/canvas:nightly-php8.5` | `canvas` | amd64 | With `nightly` | The same with PHP 8.5, for testing on Drupal 12, which requires PHP 8.5. |
 
 ### Canvas image
 
-The `canvas` image has one tag, `nightly`, which is rebuilt every night against
-Canvas's `1.x` branch. A throwaway build stage clones Canvas (`CANVAS_REF`,
+The `canvas` image has two tags, `nightly` (PHP 8.3) and `nightly-php8.5`,
+which are rebuilt every night against Canvas's `1.x` branch. A throwaway build stage clones Canvas (`CANVAS_REF`,
 default `1.x`) and goes through the same install steps Canvas's CI does:
 
 - the Composer `create-project` + `require`, once for `DRUPAL_CORE` and once for
@@ -61,3 +62,6 @@ Build locally:
 ```sh
 docker buildx build --platform linux/amd64 --target canvas -t drupal-testing-canvas .
 ```
+
+Every target uses PHP 8.3 unless you pass another version with
+`--build-arg PHP_VERSION=8.5`.
